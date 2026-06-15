@@ -1,0 +1,22 @@
+# Secrets — never in the build context / image (defense-in-depth; Dockerfile already
+# copies only app/ + requirements.txt + entrypoint.sh, but keep .env out regardless)
+.env
+.env.*
+*.key
+storage_state.json
+
+# Experiment artifacts (~470 MB of gitignored logs) — huge build-context bloat, not used at runtime
+*.log
+*.out
+*.jsonl
+sessions/
+agent_preview/
+
+# VCS + Python caches
+.git/
+.gitignore
+__pycache__/
+*.pyc
+.venv/
+venv/
+.agentbase/

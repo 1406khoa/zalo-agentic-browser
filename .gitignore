@@ -1,0 +1,44 @@
+# ── Secrets (NEVER commit) ─────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+# captured browser sessions / cookies / warm profiles
+storage_state*.json
+*storage_state*
+*.bak
+
+# ── Experiment artifacts ───────────────────────────────
+*.log
+*.out
+sessions/
+
+# ── Python ─────────────────────────────────────────────
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ── Tooling / local ────────────────────────────────────
+.agentbase/
+.claude/
+
+# Session transcript dumps / context artifacts
+*-context-i.txt
+
+# Internal docs — strategy/roadmap, NOT for the repo
+docs/
+
+# Internal docs (keep local, not in repo)
+CLAUDE.md
+PROGRESS.md
+DEMO_SCRIPT.md
+
+# Dev / test / POC / diagnostic harnesses (keep local, not in repo)
+diag_*.py
+dev_*.py
+probe_*.py
+analyze_log.py
+vision_retest.py

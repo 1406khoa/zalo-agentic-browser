@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="vi" translate="no">
+<head>
+<meta charset="utf-8">
+<meta name="google" content="notranslate">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AGENT OPS // LIVE</title>
+<style>
+  /* GPU-cheap overlays only — NO backdrop-filter / blend-mode / scanline / animation (those
+     composite over the live feed on the VIEWER's device and were the real FPS killer in v21/22).
+     The feed itself is now true VNC delta-streaming (noVNC), not a 2fps snapshot poll. */
+  :root{ --amber:#ffb454; --cyan:#5fe8d0; --red:#ff5470; --green:#6ee7a8; --ink:#e8e2d4; --mute:#8893a3;
+    --panel:#0c1118; --line:#243240; --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace; }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%; overflow:hidden; background:#000}
+  body{color:var(--ink); font-family:var(--mono); -webkit-tap-highlight-color:transparent}
+
+  /* ── feed: noVNC canvas container (the star). noVNC scales the 1920×1080 remote to fit. ── */
+  #screen{position:fixed; inset:0; background:#000; display:none}
+  #screen canvas{display:block; margin:auto}
+  /* fallback: snapshot poll (only if the VNC WebSocket can't establish through the ingress) */
+  #fallbackImg{position:fixed; inset:0; width:100vw; height:100dvh; object-fit:contain; background:#000; display:none}
+  #noSignal{position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    color:var(--mute); font-size:13px; letter-spacing:.18em; text-align:center; padding:20px}
+
+  /* ── reasoning stream — bottom-right, solid ── */
+  #logbox{position:fixed; right:14px; bottom:14px; width:min(390px,94vw); height:min(48vh,480px);
+    z-index:8; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--line);
+    border-radius:8px; box-shadow:0 8px 28px rgba(0,0,0,.5); overflow:hidden}
+  #logbox.collapsed{height:40px}
+  #loghd{display:flex; align-items:center; gap:8px; padding:10px 12px; cursor:grab; flex:0 0 auto;
+    border-bottom:1px solid var(--line); touch-action:none}
+  #loghd .ttl{font-size:10px; letter-spacing:.18em; color:var(--amber); flex:1}
+  #loghd button{background:transparent; border:1px solid var(--line); color:var(--cyan); width:24px; height:22px;
+    border-radius:4px; font-family:var(--mono); cursor:pointer; font-size:12px; line-height:1}
+  #loghd button:hover{border-color:var(--amber); color:var(--amber)}
+  #log{flex:1; overflow-y:auto; padding:10px 12px; font-size:12px; line-height:1.5;
+    scrollbar-width:thin; scrollbar-color:var(--line) transparent}
+  #log::-webkit-scrollbar{width:5px} #log::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+  .step{margin-bottom:11px; padding-left:10px; border-left:2px solid var(--line)}
+  .step.adv{border-left-color:var(--amber)}
+  .n{color:var(--mute); font-size:9px; letter-spacing:.12em}
+  .ln{display:block; margin-top:2px}
+  .ln .k{color:var(--mute); font-size:9px; margin-right:6px}
+  .ev{color:var(--green)} .ev.bad{color:var(--red)}
+  .mem{color:var(--mute)} .goal{color:var(--amber)} .advline{color:var(--cyan)}
+  #logfab{position:fixed; right:14px; bottom:14px; z-index:8; display:none;
+    background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:9px 14px; cursor:pointer;
+    color:var(--amber); font-family:var(--mono); font-size:11px; letter-spacing:.1em}
+
+  /* ── ask_user (auto-shows when the agent asks) ── */
+  #decision{position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:12;
+    width:min(560px,94vw); display:none; background:var(--panel); border:1px solid var(--red); border-radius:9px;
+    padding:14px 16px; box-shadow:0 8px 34px rgba(0,0,0,.55)}
+  #decision .hd{color:var(--red); font-size:11px; letter-spacing:.14em; margin-bottom:6px}
+  #decision .q{color:var(--ink); font-size:15px; margin-bottom:11px; line-height:1.35}
+  .opts{display:flex; flex-wrap:wrap; gap:8px}
+  .opt{flex:1 1 auto; min-width:130px; display:flex; align-items:center; gap:9px; cursor:pointer;
+    border:1px solid var(--line); background:#121a24; color:var(--ink); padding:11px 13px; border-radius:5px;
+    font-family:var(--mono); font-size:13px}
+  .opt:hover{border-color:var(--amber)}
+  .kc{display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px;
+    border:1px solid var(--line); border-radius:4px; color:var(--cyan); font-size:11px; flex-shrink:0}
+  .opt .tag{margin-left:auto; color:var(--amber); font-size:9px}
+  .custom{display:flex; gap:8px; margin-top:9px}
+  .custom input{flex:1; min-width:0; background:#06090e; border:1px solid var(--line); color:var(--ink);
+    font-family:var(--mono); font-size:13px; padding:10px 12px; border-radius:5px}
+  .custom input:focus{outline:none; border-color:var(--cyan)}
+  .custom button{background:var(--amber); color:#06080d; border:0; font-family:var(--mono); font-weight:600;
+    padding:0 18px; border-radius:5px; cursor:pointer}
+  .locked{color:var(--green); font-size:13px; padding:6px 2px}
+
+  /* ── chen ngang (FUNCTIONAL — goes through the agent, safe) — bottom-left, only while running ── */
+  #intBtn{position:fixed; left:14px; bottom:14px; z-index:9; display:none; align-items:center; gap:7px;
+    background:var(--panel); border:1px solid var(--amber); border-radius:6px; padding:9px 14px; cursor:pointer;
+    color:var(--amber); font-family:var(--mono); font-size:11px; letter-spacing:.1em}
+  #intBtn:hover{background:#1a1408}
+  #intPanel{position:fixed; left:14px; bottom:14px; z-index:13; width:min(420px,92vw); display:none;
+    background:var(--panel); border:1px solid var(--amber); border-radius:9px; padding:12px 13px; box-shadow:0 8px 34px rgba(0,0,0,.55)}
+  #intPanel .hd{color:var(--amber); font-size:10px; letter-spacing:.14em; margin-bottom:8px}
+  #intPanel .row{display:flex; gap:8px}
+  #intPanel input{flex:1; min-width:0; background:#06090e; border:1px solid var(--line); color:var(--ink);
+    font-family:var(--mono); font-size:13px; padding:10px 12px; border-radius:5px}
+  #intPanel input:focus{outline:none; border-color:var(--amber)}
+  #intPanel button{background:var(--amber); color:#06080d; border:0; font-family:var(--mono); font-weight:600; padding:0 15px; border-radius:5px; cursor:pointer}
+  #intPanel button.x{background:transparent; border:1px solid var(--line); color:var(--mute); padding:0 11px}
+  #intOk{color:var(--green); font-size:12px; margin-top:7px; display:none}
+
+  /* ── takeover bar (DIRECT control) — COMING SOON, decorative only (no input wired: the link is
+       shared, so raw control of the logged-in browser is intentionally NOT enabled yet) ── */
+  #takeover{position:fixed; left:50%; bottom:14px; transform:translateX(-50%); z-index:6;
+    display:flex; align-items:center; gap:9px; width:min(440px,92vw);
+    background:var(--panel); border:1px dashed var(--line); border-radius:9px; padding:9px 11px; opacity:.7; cursor:pointer}
+  #takeover .ic{color:var(--mute); font-size:14px}
+  #takeover .mock{flex:1; color:var(--mute); font-size:12px; border:1px solid var(--line); border-radius:5px;
+    padding:8px 10px; background:#06090e; pointer-events:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  #takeover .soon{flex-shrink:0; color:var(--amber); font-size:9px; letter-spacing:.12em; border:1px solid var(--amber);
+    border-radius:4px; padding:3px 7px}
+  #takeoverToast{position:fixed; left:50%; bottom:64px; transform:translateX(-50%); z-index:14; display:none;
+    background:var(--panel); border:1px solid var(--amber); color:var(--ink); font-size:12px; line-height:1.45;
+    border-radius:8px; padding:11px 15px; width:min(440px,92vw); box-shadow:0 8px 34px rgba(0,0,0,.55)}
+  #takeoverToast b{color:var(--amber)}
+
+  /* ── result banner ── */
+  #banner{position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:11; width:min(620px,94vw);
+    display:none; border:1px solid var(--green); border-radius:8px; padding:11px 15px; background:var(--panel);
+    color:var(--green); font-size:12px; line-height:1.45}
+  #banner.err{border-color:var(--red); color:var(--red)}
+  #banner b{color:var(--amber); display:block; letter-spacing:.14em; margin-bottom:3px}
+</style>
+</head>
+<body>
+  <div id="screen"></div>
+  <img id="fallbackImg" alt="">
+  <div id="noSignal">◌ đang kết nối luồng trực tiếp…</div>
+
+  <div id="logbox">
+    <div id="loghd">
+      <span class="ttl">REASONING STREAM</span>
+      <button id="btnCollapse" title="thu gọn">–</button>
+      <button id="btnClose" title="ẩn">×</button>
+    </div>
+    <div id="log"></div>
+  </div>
+  <div id="logfab">▣ LOG</div>
+
+  <div id="decision">
+    <div class="hd">⚠ AGENT CẦN BẠN QUYẾT ĐỊNH</div>
+    <div class="q" id="d-q"></div>
+    <div class="opts" id="d-opts"></div>
+    <div class="custom"><input id="d-custom" placeholder="…hoặc tự nhập câu trả lời"><button id="d-send">GỬI</button></div>
+  </div>
+
+  <div id="intBtn">✎ CHEN NGANG</div>
+  <div id="intPanel">
+    <div class="hd">CHEN NGANG — thêm yêu cầu cho agent</div>
+    <div class="row">
+      <input id="intInput" placeholder="vd: đổi sang màu đen, thêm 1 cái quần…" maxlength="300">
+      <button id="intSend">GỬI</button>
+      <button id="intCancel" class="x">✕</button>
+    </div>
+    <div id="intOk">🟡 Đã gửi — agent sẽ xử lý ở bước kế tiếp.</div>
+  </div>
+
+  <!-- DIRECT control — Coming soon (decorative; no raw input is wired to the live browser) -->
+  <div id="takeover" title="Điều khiển trực tiếp — sắp ra mắt">
+    <span class="ic">🕹</span>
+    <span class="mock">Tự tay điều khiển trình duyệt của agent…</span>
+    <span class="soon">SẮP RA MẮT</span>
+  </div>
+  <div id="takeoverToast"><b>🕹 Điều khiển trực tiếp — sắp ra mắt.</b>
+    Hiện tại bạn đang ở chế độ <b>xem trực tiếp</b> (view-only). Tính năng tự tay click/gõ vào trình duyệt của agent đang được hoàn thiện.</div>
+
+  <div id="banner"></div>
+
+<!-- ── FEED: noVNC over the WS↔VNC bridge (true delta-streaming). Falls back to snapshot poll
+       if the WebSocket can't establish through the ingress. ── -->
+<script type="module">
+  import RFB from '/novnc/core/rfb.js';
+  (function(){
+    const target=document.getElementById('screen'), noSignal=document.getElementById('noSignal');
+    const proto=location.protocol==='https:'?'wss':'ws';
+    const url=proto+'://'+location.host+'/websockify';
+    let rfb=null, fellBack=false, timer=null;
+    function fallback(){ if(fellBack)return; fellBack=true;
+      try{ if(rfb) rfb.disconnect(); }catch(e){}
+      if(window.startSnapshotFallback) window.startSnapshotFallback(); }
+    // When the task ends, the agent's Chrome closes → the live Xvfb goes black. Freeze instead:
+    // drop the VNC stream and show the snapshot of the FINAL frame (served by /snapshot.jpg via
+    // set_final_frame). Called by the /state poller on `done`.
+    window.__freezeLive = fallback;
+    try{
+      rfb=new RFB(target, url, { shared:true });
+      rfb.viewOnly=true;            // VIEW-ONLY — no input is sent to the agent's browser
+      rfb.scaleViewport=true;       // scale the 1920×1080 remote to fit this viewport (whole page, sharp)
+      rfb.clipViewport=false;
+      rfb.background='#000';
+      timer=setTimeout(fallback, 8000);   // ingress didn't upgrade / VNC unreachable → snapshot
+      rfb.addEventListener('connect', ()=>{ clearTimeout(timer);
+        target.style.display='block'; if(noSignal) noSignal.style.display='none'; });
+      rfb.addEventListener('disconnect', ()=>{ clearTimeout(timer); fallback(); });
+    }catch(e){ fallback(); }
+  })();
+</script>
+
+<script>
+(function(){
+  "use strict";
+  const $=id=>document.getElementById(id);
+  const DEMO=new URLSearchParams(location.search).has('demo');
+  const seen=new Set(); let running=false, answered=false, curPending=null, frozen=false;
+  const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+  /* ── snapshot FALLBACK (only if noVNC/WebSocket can't establish) ── */
+  window.startSnapshotFallback=function(){
+    const img=$('fallbackImg'), ns=$('noSignal'), scr=$('screen');
+    if(scr) scr.style.display='none';
+    if(ns) ns.textContent='◌ đang kết nối (chế độ ảnh)…';
+    function poll(){ const im=new Image();
+      im.onload=()=>{ img.src=im.src; img.style.display='block'; if(ns)ns.style.display='none'; setTimeout(poll,450); };
+      im.onerror=()=>{ setTimeout(poll,1200); };
+      im.src=(DEMO?'https://picsum.photos/seed/agentops/1600/900':'snapshot.jpg')+'?t='+Date.now(); }
+    poll();
+  };
+
+  /* ── reasoning stream ── */
+  const log=$('log');
+  function renderThought(t){
+    const div=document.createElement('div'); div.className='step'+(t.kind==='advisor'?' adv':'');
+    let h='<span class="n">▸ STEP '+(t.n||'?')+'</span>';
+    if(t.kind==='advisor'){ h+='<span class="ln advline">⟁ '+esc(t.goal||'Agent Advisor')+'</span>'; }
+    else{
+      if(t.eval) h+='<span class="ln"><span class="k">EVAL</span><span class="ev'+(/fail|unable|không|sai|stale|error|issue/i.test(t.eval)?' bad':'')+'">'+esc(t.eval)+'</span></span>';
+      if(t.memory) h+='<span class="ln"><span class="k">MEM </span><span class="mem">'+esc(t.memory)+'</span></span>';
+      if(t.goal) h+='<span class="ln"><span class="k">GOAL</span><span class="goal">'+esc(t.goal)+'</span></span>';
+    }
+    div.innerHTML=h; log.appendChild(div); log.scrollTop=log.scrollHeight;
+  }
+  function ingest(ths){ (ths||[]).forEach(t=>{ const id=(t.kind||'step')+':'+t.n;
+    if(seen.has(id))return; seen.add(id); renderThought(t); }); }
+
+  /* ── log box: collapse / hide / reopen / drag ── */
+  const box=$('logbox'), hd=$('loghd'), fab=$('logfab'); let drag=null;
+  hd.addEventListener('pointerdown',e=>{ if(e.target.tagName==='BUTTON')return;
+    drag={dx:e.clientX-box.offsetLeft, dy:e.clientY-box.offsetTop}; hd.setPointerCapture(e.pointerId); });
+  hd.addEventListener('pointermove',e=>{ if(!drag)return;
+    let x=Math.max(4,Math.min(innerWidth-box.offsetWidth-4, e.clientX-drag.dx));
+    let y=Math.max(4,Math.min(innerHeight-box.offsetHeight-4, e.clientY-drag.dy));
+    box.style.left=x+'px'; box.style.top=y+'px'; box.style.right='auto'; box.style.bottom='auto'; });
+  hd.addEventListener('pointerup',()=>{drag=null;});
+  $('btnCollapse').onclick=()=>box.classList.toggle('collapsed');
+  $('btnClose').onclick=()=>{ box.style.display='none'; fab.style.display='block'; };
+  fab.onclick=()=>{ box.style.display='flex'; fab.style.display='none'; };
+
+  /* ── ask_user ── */
+  const dec=$('decision'), KEY=['1','2','3','4','5'];
+  function showDecision(p){
+    if(curPending && JSON.stringify(p)===JSON.stringify(curPending))return;
+    curPending=p; answered=false;
+    dec.querySelector('.hd').style.display=''; $('d-q').textContent=p.question||'';
+    const w=$('d-opts'); w.innerHTML='';
+    (p.options||[]).forEach((o,i)=>{ const b=document.createElement('button'); b.className='opt';
+      b.innerHTML='<span class="kc">'+(KEY[i]||'+')+'</span><span>'+esc(o)+'</span>'+(i===0?'<span class="tag">ĐỀ XUẤT</span>':'');
+      b.onclick=()=>answer(o); w.appendChild(b); });
+    $('d-custom').value=''; dec.querySelector('.custom').style.display='flex'; dec.style.display='block';
+  }
+  function hideDecision(){ dec.style.display='none'; curPending=null; }
+  function answer(v){ if(answered)return; answered=true;
+    dec.querySelector('.opts').innerHTML=''; dec.querySelector('.custom').style.display='none';
+    dec.querySelector('.hd').style.display='none'; $('d-q').innerHTML='<span class="locked">✓ ĐÃ CHỌN → '+esc(v)+'</span>';
+    if(DEMO){ setTimeout(hideDecision,1400); return; }
+    fetch('answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})}).catch(()=>{});
+    setTimeout(()=>{ if(answered)hideDecision(); },1400);
+  }
+  $('d-send').onclick=()=>{ const v=$('d-custom').value.trim(); if(v)answer(v); };
+  $('d-custom').addEventListener('keydown',e=>{ e.stopPropagation(); if(e.key==='Enter'){const v=e.target.value.trim(); if(v)answer(v);} });
+  document.addEventListener('keydown',e=>{ if(dec.style.display==='block'&&!answered&&curPending){
+    const i=KEY.indexOf(e.key); if(i>=0&&curPending.options[i])answer(curPending.options[i]); }});
+
+  /* ── chen ngang (interrupt) → POST /interrupt (agent re-plans; goes through every safety gate) ── */
+  const intBtn=$('intBtn'), intPanel=$('intPanel'), intInput=$('intInput'), intOk=$('intOk');
+  function intClose(){ intPanel.style.display='none'; if(running)intBtn.style.display='flex'; }
+  intBtn.onclick=()=>{ intPanel.style.display='block'; intBtn.style.display='none'; intOk.style.display='none'; intInput.value=''; intInput.focus(); };
+  $('intCancel').onclick=intClose;
+  function sendInterrupt(){ const v=intInput.value.trim(); if(!v)return;
+    if(DEMO){ intOk.style.display='block'; intInput.value=''; setTimeout(intClose,1300); return; }
+    fetch('interrupt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:v})})
+      .then(r=>r.json()).then(j=>{ intOk.textContent=j.ok?'🟡 Đã gửi — agent sẽ xử lý ở bước kế tiếp.':'⚠ Chưa có tác vụ đang chạy.';
+        intOk.style.display='block'; if(j.ok){ intInput.value=''; setTimeout(intClose,1400);} })
+      .catch(()=>{ intOk.textContent='⚠ Lỗi gửi, thử lại.'; intOk.style.display='block'; }); }
+  $('intSend').onclick=sendInterrupt;
+  intInput.addEventListener('keydown',e=>{ e.stopPropagation(); if(e.key==='Enter')sendInterrupt(); });
+
+  /* ── takeover (Coming soon) — decorative; tapping explains the view-only state ── */
+  const to=$('takeover'), toToast=$('takeoverToast'); let toT=null;
+  to.onclick=()=>{ toToast.style.display='block'; clearTimeout(toT); toT=setTimeout(()=>toToast.style.display='none',3200); };
+
+  /* ── result banner ── */
+  function banner(txt,err){ const b=$('banner'); b.className=err?'err':''; b.style.display='block';
+    b.innerHTML='<b>'+(err?'⚠ DỪNG':'◉ ĐÃ TỚI ĐIỂM DỪNG — CHỜ BẠN')+'</b>'+esc(txt); }
+
+  /* ── apply /state ── */
+  function apply(s){
+    running=!!s.running;
+    ingest(s.thoughts);
+    if(s.pending) showDecision(s.pending); else if(!answered) hideDecision();
+    if(s.done){ banner(s.result||'Đã tới điểm dừng.', /lỗi|error|fail|kẹt|unable/i.test(s.result||''));
+      if(!frozen){ frozen=true; if(window.__freezeLive) window.__freezeLive(); } }
+    if(running){ if(intPanel.style.display!=='block') intBtn.style.display='flex'; }
+    else { intBtn.style.display='none'; intPanel.style.display='none'; }
+  }
+  async function poll(){ try{ const r=await fetch('state',{cache:'no-store'}); if(r.ok)apply(await r.json()); }catch(e){} setTimeout(poll,1000); }
+
+  if(DEMO){ window.startSnapshotFallback(); runDemo(); } else poll();
+
+  /* ── demo (?demo=1) ── */
+  function runDemo(){
+    running=true; intBtn.style.display='flex';
+    const seq=[
+      {n:1,eval:'Đã mở trang, có popup đăng nhập',memory:'Trang chủ',goal:'Đóng popup rồi mở form tìm'},
+      {n:2,eval:'Đã vào form tìm',memory:'Form',goal:'Nhập thông tin, chọn lựa chọn'},
+      {n:3,kind:'advisor',goal:'Phát hiện kẹt lặp lại — tự hỏi Agent Advisor'},
+      {n:4,eval:'Theo Advisor: thao tác lại',memory:'OK',goal:'Tới bước cuối rồi dừng trước thanh toán'},
+    ];
+    let i=0;(function tick(){ if(i<seq.length){ renderThought(seq[i]); i++;
+      if(i===2) setTimeout(()=>showDecision({question:'Bạn chọn phương án nào?',options:['Phương án A','Phương án B']}),700);
+      setTimeout(tick,2200);
+    } else banner('Đã tới màn thanh toán — dừng trước khi trả tiền.'); })();
+  }
+})();
+</script>
+</body>
+</html>

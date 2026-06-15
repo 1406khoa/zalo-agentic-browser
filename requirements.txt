@@ -1,0 +1,8 @@
+# browser-use 0.12.9 hard-pins httpx==0.28.1 and pulls pydantic/openai/anyio etc.
+# Let pip resolve those around it; only pin what's specific to the bot.
+zlapi==1.0.3
+browser-use==0.12.9
+fastapi
+uvicorn
+websockets     # uvicorn WS support — for the /ws-echo ingress probe + the noVNC WS↔VNC bridge
+mss            # grab the Xvfb virtual display for the /live MJPEG stream (Pillow comes via browser-use)
