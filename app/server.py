@@ -14,7 +14,7 @@ from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse,
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import llm, state
+from . import agent_runner, llm, state
 
 app = FastAPI(title="Zalo AI Bot")
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -168,6 +168,30 @@ def live_interrupt(req: InterruptRequest):
     """Send a mid-task 'chen ngang' from the live page into the running task's
     interrupt queue (same path as Zalo '@ai /interrupt'). ok=False if nothing runs."""
     return {"ok": bool(state.deliver_live_interrupt((req.text or "").strip()))}
+
+
+class TaskRequest(BaseModel):
+    task: str
+    mode: str = "interactive"
+
+
+@app.post("/task")
+def start_web_task_ep(req: TaskRequest):
+    """Start a browser task from the /live page (anonymous web voter). ISOLATED from Zalo +
+    demo_mode (no login, no ordering — enforced in agent_runner.start_web_task / build_tools).
+    409 if the single shared browser is already busy; the page then polls /state for progress."""
+    task = (req.task or "").strip()
+    if not task:
+        return JSONResponse({"ok": False, "error": "Nhập tác vụ cần làm nhé."}, status_code=400)
+    task = task[:500]
+    mode = req.mode if req.mode in ("interactive", "autonomous") else "interactive"
+    ok = agent_runner.start_web_task(task, mode=mode, demo_mode=True)
+    if not ok:
+        return JSONResponse(
+            {"ok": False, "busy": True,
+             "error": "Agent đang bận chạy một tác vụ khác — chờ xong rồi thử lại nhé."},
+            status_code=409)
+    return {"ok": True}
 
 
 @app.get("/logs")

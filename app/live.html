@@ -86,20 +86,57 @@
   #intPanel button.x{background:transparent; border:1px solid var(--line); color:var(--mute); padding:0 11px}
   #intOk{color:var(--green); font-size:12px; margin-top:7px; display:none}
 
-  /* ── takeover bar (DIRECT control) — COMING SOON, decorative only (no input wired: the link is
-       shared, so raw control of the logged-in browser is intentionally NOT enabled yet) ── */
-  #takeover{position:fixed; left:50%; bottom:14px; transform:translateX(-50%); z-index:6;
-    display:flex; align-items:center; gap:9px; width:min(440px,92vw);
-    background:var(--panel); border:1px dashed var(--line); border-radius:9px; padding:9px 11px; opacity:.7; cursor:pointer}
-  #takeover .ic{color:var(--mute); font-size:14px}
-  #takeover .mock{flex:1; color:var(--mute); font-size:12px; border:1px solid var(--line); border-radius:5px;
-    padding:8px 10px; background:#06090e; pointer-events:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  #takeover .soon{flex-shrink:0; color:var(--amber); font-size:9px; letter-spacing:.12em; border:1px solid var(--amber);
-    border-radius:4px; padding:3px 7px}
-  #takeoverToast{position:fixed; left:50%; bottom:64px; transform:translateX(-50%); z-index:14; display:none;
-    background:var(--panel); border:1px solid var(--amber); color:var(--ink); font-size:12px; line-height:1.45;
-    border-radius:8px; padding:11px 15px; width:min(440px,92vw); box-shadow:0 8px 34px rgba(0,0,0,.55)}
-  #takeoverToast b{color:var(--amber)}
+  /* ── command bar (DIRECT control — LIVE): type a task → POST /task → the agent does it live.
+       demo-mode (no login, no payment) is enforced server-side. ── */
+  #cmdbar{position:fixed; left:50%; bottom:14px; transform:translateX(-50%); z-index:10;
+    width:min(680px,94vw); display:flex; flex-direction:column; gap:8px}
+  #chips{display:flex; flex-wrap:wrap; gap:7px; justify-content:center}
+  .chip{background:var(--panel); border:1px solid var(--line); color:var(--mute); border-radius:999px;
+    padding:6px 12px; font-family:var(--mono); font-size:11px; cursor:pointer; white-space:nowrap}
+  .chip:hover{border-color:var(--amber); color:var(--amber)}
+  .cmdrow{display:flex; align-items:center; gap:9px; background:var(--panel); border:1px solid var(--amber);
+    border-radius:10px; padding:9px 11px; box-shadow:0 8px 28px rgba(0,0,0,.5)}
+  .cmdrow .ic{color:var(--amber); font-size:15px; flex-shrink:0}
+  #cmdInput{flex:1; min-width:0; background:#06090e; border:1px solid var(--line); color:var(--ink);
+    font-family:var(--mono); font-size:13px; padding:11px 13px; border-radius:6px}
+  #cmdInput:focus{outline:none; border-color:var(--cyan)}
+  #cmdInput:disabled{opacity:.5}
+  #cmdSend{background:var(--amber); color:#06080d; border:0; font-family:var(--mono); font-weight:700;
+    letter-spacing:.06em; padding:0 18px; height:38px; border-radius:6px; cursor:pointer; flex-shrink:0}
+  #cmdSend:disabled{background:var(--line); color:var(--mute); cursor:default}
+  #cmdMsg{text-align:center; font-size:11px; color:var(--mute); min-height:14px}
+  #cmdMsg.err{color:var(--red)}
+
+  /* ── feature-launch popup + onboarding coachmarks ── */
+  #scrim{position:fixed; inset:0; z-index:30; background:rgba(2,5,10,.78); display:none}
+  #popup{position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:31; display:none;
+    width:min(460px,92vw); background:var(--panel); border:1px solid var(--amber); border-radius:14px;
+    padding:24px 22px; box-shadow:0 18px 60px rgba(0,0,0,.6); text-align:center}
+  #popup .badge{display:inline-block; color:var(--amber); border:1px solid var(--amber); border-radius:999px;
+    font-size:10px; letter-spacing:.18em; padding:4px 11px; margin-bottom:13px}
+  #popup h2{color:var(--ink); font-size:19px; line-height:1.3; margin-bottom:9px; font-family:var(--mono); font-weight:700}
+  #popup p{color:var(--mute); font-size:13px; line-height:1.55; margin-bottom:18px}
+  #popup p b{color:var(--cyan)}
+  #popup .row{display:flex; gap:9px}
+  #popup button{flex:1; font-family:var(--mono); font-size:12px; padding:11px; border-radius:7px; cursor:pointer}
+  #pGuide{background:var(--amber); color:#06080d; border:0; font-weight:700}
+  #pSkip{background:transparent; color:var(--mute); border:1px solid var(--line)}
+  #coach{position:fixed; z-index:32; display:none; width:min(330px,90vw);
+    background:var(--panel); border:1px solid var(--cyan); border-radius:11px; padding:15px 16px;
+    box-shadow:0 14px 50px rgba(0,0,0,.6)}
+  #coach .ttl{color:var(--cyan); font-size:11px; letter-spacing:.12em; margin-bottom:7px}
+  #coach .txt{color:var(--ink); font-size:13px; line-height:1.5; margin-bottom:13px}
+  #coach .nav{display:flex; align-items:center; justify-content:space-between}
+  #coach .dots{color:var(--mute); font-size:11px; letter-spacing:.2em}
+  #coach .nx{background:var(--cyan); color:#06080d; border:0; font-family:var(--mono); font-weight:700;
+    font-size:12px; padding:8px 15px; border-radius:6px; cursor:pointer}
+  #coach .arr{position:absolute; color:var(--cyan); font-size:26px; line-height:1; animation:bob 1s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(5px)}}
+  #coach.c-input{left:50%; bottom:130px; transform:translateX(-50%)}
+  #coach.c-input .arr{left:50%; bottom:-24px; margin-left:-8px}
+  #coach.c-log{right:18px; bottom:calc(min(48vh,480px) + 30px)}
+  #coach.c-log .arr{right:26px; bottom:-24px}
+  #coach.c-mid{left:50%; top:50%; transform:translate(-50%,-50%)}
 
   /* ── result banner ── */
   #banner{position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:11; width:min(620px,94vw);
@@ -142,14 +179,38 @@
     <div id="intOk">🟡 Đã gửi — agent sẽ xử lý ở bước kế tiếp.</div>
   </div>
 
-  <!-- DIRECT control — Coming soon (decorative; no raw input is wired to the live browser) -->
-  <div id="takeover" title="Điều khiển trực tiếp — sắp ra mắt">
-    <span class="ic">🕹</span>
-    <span class="mock">Tự tay điều khiển trình duyệt của agent…</span>
-    <span class="soon">SẮP RA MẮT</span>
+  <!-- DIRECT control — LIVE: type a task → POST /task (demo-mode: no login, no payment, server-enforced) -->
+  <div id="cmdbar">
+    <div id="chips">
+      <button class="chip" data-t="Tìm chuyến bay TP HCM đi Hà Nội rẻ nhất cuối tuần này">✈️ Vé bay rẻ nhất</button>
+      <button class="chip" data-t="Gợi ý lịch trình 2 ngày 1 đêm ở Đà Nẵng kèm chỗ ăn chơi">🗺️ Lịch trình Đà Nẵng</button>
+      <button class="chip" data-t="Tìm vài nhà hàng lẩu được đánh giá tốt gần quận 1 TP HCM">🍲 Nhà hàng gần đây</button>
+    </div>
+    <div class="cmdrow">
+      <span class="ic">🕹</span>
+      <input id="cmdInput" placeholder="Bảo agent làm gì đó trên web — nó sẽ MỞ TRÌNH DUYỆT và làm thật…" maxlength="500" autocomplete="off">
+      <button id="cmdSend">CHẠY</button>
+    </div>
+    <div id="cmdMsg"></div>
   </div>
-  <div id="takeoverToast"><b>🕹 Điều khiển trực tiếp — sắp ra mắt.</b>
-    Hiện tại bạn đang ở chế độ <b>xem trực tiếp</b> (view-only). Tính năng tự tay click/gõ vào trình duyệt của agent đang được hoàn thiện.</div>
+
+  <!-- feature-launch popup + onboarding -->
+  <div id="scrim"></div>
+  <div id="popup">
+    <span class="badge">◉ TÍNH NĂNG MỚI</span>
+    <h2>Tự tay điều khiển Agent<br>ngay trong trình duyệt</h2>
+    <p>Không chỉ xem — giờ bạn gõ một yêu cầu, Agent sẽ <b>mở trình duyệt thật và tự làm</b> trước mắt bạn, vừa làm vừa cho bạn xem nó suy nghĩ.</p>
+    <div class="row">
+      <button id="pSkip">Để sau</button>
+      <button id="pGuide">Xem hướng dẫn nhanh →</button>
+    </div>
+  </div>
+  <div id="coach">
+    <div class="ttl" id="cTtl"></div>
+    <div class="txt" id="cTxt"></div>
+    <div class="nav"><span class="dots" id="cDots"></span><button class="nx" id="cNext"></button></div>
+    <span class="arr" id="cArr">↓</span>
+  </div>
 
   <div id="banner"></div>
 
@@ -271,17 +332,62 @@
   $('intSend').onclick=sendInterrupt;
   intInput.addEventListener('keydown',e=>{ e.stopPropagation(); if(e.key==='Enter')sendInterrupt(); });
 
-  /* ── takeover (Coming soon) — decorative; tapping explains the view-only state ── */
-  const to=$('takeover'), toToast=$('takeoverToast'); let toT=null;
-  to.onclick=()=>{ toToast.style.display='block'; clearTimeout(toT); toT=setTimeout(()=>toToast.style.display='none',3200); };
+  /* ── command bar: type a task → POST /task (demo-mode, server-enforced). Single shared browser:
+       409 = busy. While running the input is disabled (see apply()). ── */
+  const cmdInput=$('cmdInput'), cmdSend=$('cmdSend'), cmdMsg=$('cmdMsg');
+  function setCmdMsg(t,err){ cmdMsg.textContent=t||''; cmdMsg.className=err?'err':''; }
+  function runTask(){
+    const t=(cmdInput.value||'').trim();
+    if(!t){ setCmdMsg('Nhập yêu cầu cần làm nhé.',true); cmdInput.focus(); return; }
+    if(DEMO){ setCmdMsg('(demo) đã gửi: '+t); return; }
+    cmdSend.disabled=true; setCmdMsg('Đang khởi động agent…');
+    fetch('task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task:t})})
+      .then(async r=>{ const j=await r.json().catch(()=>({}));
+        if(r.ok&&j.ok){ cmdInput.value=''; setCmdMsg('🚀 Agent bắt đầu — theo dõi bên dưới.'); }
+        else { setCmdMsg(j.error||'Không khởi động được, thử lại.',true); cmdSend.disabled=false; } })
+      .catch(()=>{ setCmdMsg('Lỗi mạng, thử lại.',true); cmdSend.disabled=false; });
+  }
+  cmdSend.onclick=runTask;
+  cmdInput.addEventListener('keydown',e=>{ e.stopPropagation(); if(e.key==='Enter')runTask(); });
+  Array.prototype.forEach.call(document.querySelectorAll('.chip'),c=>{
+    c.onclick=()=>{ cmdInput.value=c.getAttribute('data-t')||''; cmdInput.focus(); }; });
+
+  /* ── feature popup + onboarding coachmarks (shown once per browser) ── */
+  const scrim=$('scrim'), popup=$('popup');
+  const STEPS=[
+    {cls:'c-input', arr:'↓', ttl:'① THANH ĐIỀU KHIỂN', txt:'Gõ yêu cầu vào đây — vd "tìm vé máy bay rẻ nhất". Agent sẽ MỞ TRÌNH DUYỆT VÀ LÀM THẬT, không chỉ trả lời như chatbot.'},
+    {cls:'c-log', arr:'↓', ttl:'② DÒNG SUY NGHĨ', txt:'Đọc suy nghĩ của agent realtime ở đây — từng bước nó nhìn trang, quyết định rồi thao tác.'},
+    {cls:'c-mid', arr:'', ttl:'③ AN TOÀN', txt:'Agent DỪNG trước khi thanh toán và KHÔNG bao giờ gõ số thẻ. Đây là bản demo công khai: không đăng nhập, không đặt hàng.'},
+  ];
+  let cStep=0;
+  function showCoach(i){ cStep=i; const s=STEPS[i]; const coach=$('coach'); coach.className=s.cls;
+    $('cTtl').textContent=s.ttl; $('cTxt').textContent=s.txt;
+    $('cArr').textContent=s.arr; $('cArr').style.display=s.arr?'block':'none';
+    $('cDots').textContent=STEPS.map((_,k)=>k===i?'●':'○').join(' ');
+    $('cNext').textContent=i<STEPS.length-1?'Tiếp →':'Bắt đầu ✓';
+    scrim.style.display='block'; coach.style.display='block'; }
+  function endOnboard(){ scrim.style.display='none'; popup.style.display='none'; $('coach').style.display='none';
+    try{ localStorage.setItem('agentOnboardV1','1'); }catch(e){} if(cmdInput) cmdInput.focus(); }
+  $('cNext').onclick=()=>{ if(cStep<STEPS.length-1) showCoach(cStep+1); else endOnboard(); };
+  $('pGuide').onclick=()=>{ popup.style.display='none'; showCoach(0); };
+  $('pSkip').onclick=endOnboard;
+  if(!DEMO){ let seenOB=false; try{ seenOB=!!localStorage.getItem('agentOnboardV1'); }catch(e){}
+    if(!seenOB){ scrim.style.display='block'; popup.style.display='block'; } }
 
   /* ── result banner ── */
   function banner(txt,err){ const b=$('banner'); b.className=err?'err':''; b.style.display='block';
     b.innerHTML='<b>'+(err?'⚠ DỪNG':'◉ ĐÃ TỚI ĐIỂM DỪNG — CHỜ BẠN')+'</b>'+esc(txt); }
 
   /* ── apply /state ── */
+  let lastStart=0;
   function apply(s){
     running=!!s.running;
+    if(s.started_ts && s.started_ts!==lastStart){      // a NEW run began → reset the view so a 2nd task renders
+      lastStart=s.started_ts; seen.clear(); log.innerHTML=''; frozen=false; answered=false; curPending=null;
+      const b=$('banner'); if(b) b.style.display='none'; hideDecision();
+    }
+    const _ci=$('cmdInput'), _cs=$('cmdSend');
+    if(_ci&&_cs){ _ci.disabled=running; _cs.disabled=running; _cs.textContent=running?'ĐANG CHẠY…':'CHẠY'; }
     ingest(s.thoughts);
     if(s.pending) showDecision(s.pending); else if(!answered) hideDecision();
     if(s.done){ banner(s.result||'Đã tới điểm dừng.', /lỗi|error|fail|kẹt|unable/i.test(s.result||''));

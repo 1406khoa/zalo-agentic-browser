@@ -31,6 +31,9 @@ venv/
 # Internal docs — strategy/roadmap, NOT for the repo
 docs/
 
+# Feature progress trackers (local, branch-independent — see progress/README.md)
+progress/
+
 # Internal docs (keep local, not in repo)
 CLAUDE.md
 PROGRESS.md

@@ -174,10 +174,12 @@ _MODE_GUIDANCE = {
     ),
 }
 
-# Not a behaviour cap — only a runaway-loop backstop. WHEN to ask is the agent's judgment
-# (_MODE_GUIDANCE); ask_user is the user's permission gate, not something to ration.
-_ASK_CAP = {"interactive": int(os.getenv("MAX_ASKS", "12")),
-            "autonomous": int(os.getenv("MAX_ASKS_AUTO", "8"))}
+# ask-count is UNLIMITED by default (0 = no cap). It was only a runaway-loop backstop, but
+# each ask_user BLOCKS on a human answer / 300s timeout so it can't spin fast — and capping it
+# made the agent hit "question limit" mid-checkout and silently skip gates (the colour ask, the
+# continue-to-payment gate). Set MAX_ASKS / MAX_ASKS_AUTO > 0 to re-enable a finite cap.
+_ASK_CAP = {"interactive": int(os.getenv("MAX_ASKS", "0")),
+            "autonomous": int(os.getenv("MAX_ASKS_AUTO", "0"))}
 
 
 def system_guidance(mode="interactive"):
@@ -262,8 +264,13 @@ async def _element_text(session, index):
     return " ".join(parts).lower()
 
 
-def build_tools(channel, *, ask_cap=3):
-    """browser-use tool set bound to a channel, with a per-task ask cap."""
+def build_tools(channel, *, ask_cap=0, demo_mode=False):   # 0 = unlimited asks; demo_mode = public web /task
+    """browser-use tool set bound to a channel, with a per-task ask cap.
+
+    demo_mode (public browser /task from anonymous voters): HARD-disables login + ordering —
+    fill_login refuses, and a place-order/COD click is blocked UNCONDITIONALLY (ignoring
+    confirmed_pay, since the web voter is the one answering ask_user → a 'yes' must NOT open
+    a real purchase). The card-typing gate applies regardless of mode."""
     tools = Tools()
     state = {"asks": 0, "experts": 0, "confirmed_pay": False}
 
@@ -286,7 +293,7 @@ def build_tools(channel, *, ask_cap=3):
         # (high), NOT a ration on asking — and safety/essential asks (_CONFIRM_RE) are exempt entirely.
         if not _CONFIRM_RE.search(question or ""):
             state["asks"] += 1
-            if state["asks"] > ask_cap:
+            if ask_cap > 0 and state["asks"] > ask_cap:   # ask_cap<=0 → UNLIMITED (demo default)
                 return ("(Bạn đã hỏi khá nhiều lần rồi — việc nhỏ thì tự quyết hợp lý và tiếp tục; chỉ "
                         "hỏi tiếp nếu THẬT SỰ cần một quyết định / sự cho phép của người dùng.)")
         answer = await channel.ask(question, list(options or []))
@@ -335,6 +342,11 @@ def build_tools(channel, *, ask_cap=3):
         "KHÔNG dùng cho ô OTP / mã xác minh / CAPTCHA / số thẻ."
     )
     async def fill_login(site: str, browser_session) -> str:
+        if demo_mode:
+            log.info("🔒 DEMO GATE — fill_login disabled (public web demo)")
+            return ("(Chế độ DEMO công khai: ĐĂNG NHẬP đã TẮT vì an toàn — không điền tài khoản nào. "
+                    "Bỏ qua bước đăng nhập: tiếp tục bằng thao tác KHÔNG cần đăng nhập (tìm kiếm / xem / so "
+                    "sánh), hoặc DỪNG và tóm tắt những gì đã làm được cho người dùng.)")
         domain, cred = _match_login(site)
         if not cred:
             avail = ", ".join(_LOGINS.keys()) or "(chưa cấu hình site nào)"
@@ -405,6 +417,18 @@ def build_tools(channel, *, ask_cap=3):
                     # a pay-confirmation yes (state["confirmed_pay"]); otherwise send it back to ask first.
                     # (Not a hard cage: it just enforces "get the user's yes before spending money.")
                     if txt and _COMMIT_RE.search(txt):
+                        if demo_mode:
+                            log.warning("⛔ DEMO GATE — refused place-order click (public web demo), idx=%s text=%r",
+                                        params.get("index"), txt[:80])
+                            try:
+                                appstate.live_thought({"n": appstate._live.get("step", 0), "kind": "step",
+                                    "goal": "🔒 Bản demo công khai: KHÔNG đặt đơn / thanh toán"})
+                            except Exception:
+                                pass
+                            return ActionResult(error=(
+                                "[CHẶN DEMO] Đây là bản DEMO công khai — KHÔNG được đặt đơn / thanh toán (kể cả "
+                                "COD). DỪNG ngay tại đây và tóm tắt: đã tới màn đặt hàng, dừng TRƯỚC khi chốt đơn. "
+                                "ĐỪNG bấm nút này, ĐỪNG gọi ask_user để xin chốt đơn."))
                         if not state.get("confirmed_pay"):
                             log.warning("⛔ PAY GATE — place-order click before user confirmation, idx=%s text=%r",
                                         params.get("index"), txt[:80])
@@ -630,7 +654,7 @@ def stealth_session():
 
 
 def build_agent(task, channel, *, mode="interactive", model=None,
-                browser_session=None, use_vision=True, cancel_event=None):
+                browser_session=None, use_vision=True, cancel_event=None, demo_mode=False):
     mode = mode if mode in _MODE_GUIDANCE else "interactive"
     task = _neutralize_dotted(task)
     # DOM-only override (for text-only brains like MiniMax): USE_VISION=false → no screenshots.
@@ -668,7 +692,7 @@ def build_agent(task, channel, *, mode="interactive", model=None,
         task=task,
         llm=build_llm(model),
         browser_session=browser_session or local_session(),
-        tools=build_tools(channel, ask_cap=_ASK_CAP[mode]),
+        tools=build_tools(channel, ask_cap=_ASK_CAP[mode], demo_mode=demo_mode),
         use_vision=use_vision,
         # Slim the per-step input so a reasoning brain (gpt-5) thinks faster + stays
         # under the LLM timeout: smaller DOM (default 40000) + low-detail screenshot.
@@ -801,7 +825,7 @@ def _stuck_key(ev):
 
 async def run_task(task, channel, *, mode="interactive", model=None, browser_session=None,
                    use_vision=True, max_steps=40, send_image=None, send_gif=None,
-                   cancel_event=None, interrupt_key=None):
+                   cancel_event=None, interrupt_key=None, demo_mode=False):
     """Run a browser task. Every step: push a SANITIZED reasoning step (eval/memory/
     goal) to state.live_* for the /live page, and AUTO-detect stuck-loops → ESCALATE
     the ACTOR to the stronger vision model for a few steps (the actor won't self-
@@ -811,7 +835,7 @@ async def run_task(task, channel, *, mode="interactive", model=None, browser_ses
     interrupt_key = interrupt_key or getattr(channel, "thread_id", None)  # who can "chen ngang" this task
     agent = build_agent(task, channel, mode=mode, model=model,
                         browser_session=session, use_vision=use_vision,
-                        cancel_event=cancel_event)
+                        cancel_event=cancel_event, demo_mode=demo_mode)
     os.makedirs(_PREVIEW_DIR, exist_ok=True)
     frames = []
     # Point-1 escalation state: capture the FAST actor (gpt-4o) so we can restore it

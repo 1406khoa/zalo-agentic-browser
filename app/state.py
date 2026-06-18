@@ -110,6 +110,12 @@ def register_answer_registry(reg):
     _answer_reg["reg"] = reg
 
 
+def get_answer_registry():
+    """The PendingRegistry currently wired to POST /answer (the Zalo bot's, in prod). The web
+    /task path reuses this SAME instance so its ask_user resolves via the live-page buttons."""
+    return _answer_reg["reg"]
+
+
 def deliver_live_answer(value):
     """Route an answer from the live page's buttons into the pending ask_user
     (same PendingRegistry the typed-reply / poll paths feed)."""

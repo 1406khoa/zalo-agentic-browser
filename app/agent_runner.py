@@ -23,6 +23,8 @@ log = logging.getLogger("agent_runner")
 ASK_TIMEOUT = int(os.getenv("ASK_TIMEOUT", "300"))
 MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "40"))
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "3"))  # secs between native-poll vote checks
+WEB_THREAD_ID = "web"   # synthetic thread for browser-initiated (/task) runs — no Zalo group → can't leak to Zalo
+WEB_ASK_TIMEOUT = int(os.getenv("WEB_ASK_TIMEOUT", "90"))  # short (vs Zalo 300s): an abandoned voter mustn't freeze the shared browser
 
 # The tool the CHAT model (gpt-4o-mini, the front door) calls to hand a real web
 # ACTION off to the qwen browser engine. The description is the router: it must
@@ -192,6 +194,54 @@ class ZaloAskChannel(AskChannel):
                     pass
 
 
+class WebAskChannel(AskChannel):
+    """ask_user for a browser-initiated (web /task) run. The question + options surface on /live
+    via state.live_pending and are answered by the page's buttons (POST /answer → the SAME
+    PendingRegistry the Zalo path uses). NO Zalo send. Shorter timeout so an abandoned voter
+    doesn't freeze the single shared browser; on timeout it falls back to options[0]."""
+
+    def __init__(self, thread_id, initiator, registry, timeout=WEB_ASK_TIMEOUT):
+        self.thread_id = thread_id
+        self.initiator = initiator
+        self.registry = registry
+        self.timeout = timeout
+
+    async def ask(self, question, options):
+        options = list(options or [])
+        q = self.registry.open(self.thread_id, self.initiator, options)
+        state.live_pending(question, options, self.thread_id, self.initiator)
+        log.info("ASK_USER (web thread=%s): %s", self.thread_id, str(question)[:80])
+
+        def _wait():
+            try:
+                return q.get(timeout=self.timeout)
+            except queue.Empty:
+                return options[0] if options else "(không có trả lời, tự quyết hợp lý)"
+
+        try:
+            return await asyncio.to_thread(_wait)
+        finally:
+            self.registry.close(self.thread_id)
+            state.live_clear_pending()
+
+
+_WEB_REGISTRY = None
+
+
+def _web_registry():
+    """Reuse the registry registered with state (the Zalo bot's, in prod) so POST /answer resolves
+    against the SAME instance WebAskChannel opens. In shim mode (no Zalo bot) lazily create one
+    module-level registry and register it. NEVER per-call (that would split /answer routing)."""
+    global _WEB_REGISTRY
+    reg = state.get_answer_registry()
+    if reg is not None:
+        return reg
+    if _WEB_REGISTRY is None:
+        _WEB_REGISTRY = PendingRegistry()
+        state.register_answer_registry(_WEB_REGISTRY)
+    return _WEB_REGISTRY
+
+
 _active_lock = threading.Lock()
 _active = {}  # thread_id -> threading.Event (cancel signal for its running task)
 
@@ -224,7 +274,7 @@ def start_task(task, *, mode, thread_id, initiator, registry, send_func,
     tid = str(thread_id)
     cancel_event = threading.Event()
     with _active_lock:
-        if tid in _active:
+        if tid in _active or WEB_THREAD_ID in _active:   # one browse task at a time (shared Chrome + global /live)
             return False
         _active[tid] = cancel_event
 
@@ -297,6 +347,40 @@ def start_task(task, *, mode, thread_id, initiator, registry, send_func,
             registry.close(thread_id)
             with _active_lock:
                 _active.pop(tid, None)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return True
+
+
+def start_web_task(task, *, mode="interactive", demo_mode=True):
+    """Run a browser task initiated from the /live page (anonymous web voter), ISOLATED from Zalo:
+    a synthetic 'web' thread (no Zalo group → its result/ask_user can't leak to a Zalo chat), ask_user
+    on the live page, NO Zalo send, and demo_mode guardrails (no login, no ordering). Returns False if
+    ANY browse task is already running (single shared Chrome). Result surfaces on /state (page polls)."""
+    reg = _web_registry()
+    cancel_event = threading.Event()
+    with _active_lock:
+        if _active:                       # global: only one browse task at a time
+            return False
+        _active[WEB_THREAD_ID] = cancel_event
+
+    def _run():
+        try:
+            from .agent_core import run_task, container_session
+            channel = WebAskChannel(WEB_THREAD_ID, WEB_THREAD_ID, reg)
+            asyncio.run(run_task(
+                task, channel, mode=mode, demo_mode=demo_mode,
+                browser_session=container_session(), max_steps=MAX_STEPS,
+                cancel_event=cancel_event, interrupt_key=WEB_THREAD_ID,
+            ))   # result published to state.live_* → /live reads it via /state (no Zalo send)
+        except Exception:
+            if cancel_event.is_set():
+                return
+            log.exception("web task failed")
+        finally:
+            reg.close(WEB_THREAD_ID)
+            with _active_lock:
+                _active.pop(WEB_THREAD_ID, None)
 
     threading.Thread(target=_run, daemon=True).start()
     return True
